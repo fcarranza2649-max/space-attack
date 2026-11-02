@@ -1,0 +1,479 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPACE INVADERS | Arcade</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#070b20;color:white;
+ font-family:Arial,sans-serif;text-align:center;
+}
+header{
+ background:#111936;padding:22px;
+ border-bottom:2px solid #25dfff;
+}
+h1{color:#36eaff;margin:5px;font-size:34px}
+h2{color:#36eaff}
+main{max-width:850px;margin:auto;padding:15px}
+.panel{
+ background:#151e3e;padding:20px;
+ border:1px solid #293b6a;
+ border-radius:15px;margin:15px 0;
+}
+input{
+ padding:13px;border-radius:8px;
+ border:1px solid #36eaff;
+ background:#080e25;color:white;
+ font-size:16px;max-width:90%;
+}
+button{
+ padding:12px 20px;border:0;
+ border-radius:8px;background:#36eaff;
+ color:#071126;font-weight:bold;
+ cursor:pointer;margin:5px;
+}
+button:hover{background:white}
+button:disabled{opacity:.4;cursor:not-allowed}
+canvas{
+ display:block;width:100%;max-width:700px;
+ background:#020510;border:2px solid #36eaff;
+ border-radius:10px;margin:auto;
+ touch-action:none;
+}
+.stats{
+ display:flex;justify-content:space-around;
+ flex-wrap:wrap;gap:10px;
+}
+.stat{font-size:18px}
+#gameScreen{display:none}
+table{width:100%;border-collapse:collapse}
+th,td{padding:13px;border-bottom:1px solid #344263}
+th{color:#36eaff}
+.gold{color:gold}
+#status{color:#9beaff;min-height:20px}
+#touchControls{margin:12px}
+#touchControls button{font-size:20px;min-width:65px}
+footer{padding:20px;color:#8495b7}
+</style>
+</head>
+
+<body>
+
+<header>
+ <h1>🚀 SPACE INVADERS</h1>
+ <p>ARCADE GALÁCTICO</p>
+</header>
+
+<main>
+
+<section class="panel" id="startScreen">
+ <h2>👾 ¡BIENVENIDO, PILOTO!</h2>
+ <p>Defiende la galaxia de los invasores.</p>
+ <input id="name" maxlength="16"
+ placeholder="Escribe tu nombre">
+ <br><br>
+ <button onclick="startGame()">▶ JUGAR</button>
+ <p id="status">Conectando con el servidor...</p>
+</section>
+
+<section id="gameScreen">
+ <div class="panel">
+  <div class="stats">
+   <div class="stat">⭐ Puntos: <b id="score">0</b></div>
+   <div class="stat">❤️ Vidas: <b id="lives">3</b></div>
+   <div class="stat">🌌 Nivel: <b id="level">1</b></div>
+  </div>
+ </div>
+
+ <canvas id="canvas" width="700" height="500"></canvas>
+
+ <div id="touchControls">
+  <button id="leftBtn">⬅️</button>
+  <button onclick="shoot()">🔥 DISPARAR</button>
+  <button id="rightBtn">➡️</button>
+ </div>
+
+ <p>Usa las flechas o A y D para moverte.</p>
+ <p>Dispara con ESPACIO.</p>
+ <button onclick="backToMenu()">SALIR</button>
+</section>
+
+<section class="panel">
+ <h2>🏆 RANKING MUNDIAL</h2>
+ <p>Los mejores pilotos de la galaxia</p>
+
+ <table>
+  <thead>
+   <tr>
+    <th>POS.</th>
+    <th>JUGADOR</th>
+    <th>PUNTOS</th>
+   </tr>
+  </thead>
+  <tbody id="ranking">
+   <tr><td colspan="3">Cargando ranking...</td></tr>
+  </tbody>
+ </table>
+
+ <button onclick="loadRanking()">🔄 ACTUALIZAR</button>
+</section>
+
+<footer>
+ SPACE INVADERS © ARCADE GALÁCTICO
+</footer>
+
+</main>
+
+<script>
+// ===================================
+// CONFIGURACIÓN SUPABASE
+// ===================================
+
+const SUPABASE_URL = "https://zkugonfmxmrulqvhczkf.supabase.co";
+const SUPABASE_KEY = "sb_publishable_u8NWA0xHp6E7bLHCUwGmgw_GLGlBt3J";
+
+const supabaseReady =
+ SUPABASE_URL.startsWith("https://") &&
+ SUPABASE_KEY !== "TU_SUPABASE_ANON_KEY";
+
+const db = supabaseReady
+ ? window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY)
+ : null;
+
+// ===================================
+// VARIABLES DEL JUEGO
+// ===================================
+
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
+
+let player={x:325,y:455,w:48,h:25};
+let enemies=[],bullets=[],enemyBullets=[];
+let score=0,lives=3,level=1;
+let playing=false,frame=0,enemyDir=1;
+let left=false,right=false;
+let playerName="";
+let animationId=null;
+
+// ===================================
+// RANKING SUPABASE
+// ===================================
+
+async function loadRanking(){
+ const body=document.getElementById("ranking");
+
+ if(!db){
+  body.innerHTML="<tr><td colspan='3'>Configura Supabase primero</td></tr>";
+  return;
+ }
+
+ body.innerHTML="<tr><td colspan='3'>Cargando...</td></tr>";
+
+ const {data,error}=await db
+  .from("scores")
+  .select("player_name,points")
+  .order("points",{ascending:false})
+  .limit(10);
+
+ if(error){
+  body.innerHTML="<tr><td colspan='3'>Error cargando ranking</td></tr>";
+  console.error(error);
+  return;
+ }
+
+ body.innerHTML=data.length ? data.map((p,i)=>`
+  <tr>
+   <td>${["🥇","🥈","🥉"][i]||i+1}</td>
+   <td>${escapeHTML(p.player_name)}</td>
+   <td>${p.points}</td>
+  </tr>
+ `).join("") :
+ "<tr><td colspan='3'>¡Sé el primero en jugar!</td></tr>";
+}
+
+function escapeHTML(s){
+ return String(s).replace(/[&<>"']/g,c=>({
+  "&":"&amp;","<":"&lt;",">":"&gt;",
+  '"':"&quot;","'":"&#39;"
+ }[c]));
+}
+
+async function saveScore(){
+ if(!db){
+  document.getElementById("status").textContent=
+   "Supabase no está configurado.";
+  return;
+ }
+
+ const {error}=await db.from("scores").insert({
+  player_name:playerName,
+  points:score
+ });
+
+ if(error){
+  console.error(error);
+  alert("No se pudo guardar la puntuación.");
+ }else{
+  document.getElementById("status").textContent=
+   "¡Puntuación guardada en el ranking mundial!";
+  await loadRanking();
+ }
+}
+
+// ===================================
+// INICIAR PARTIDA
+// ===================================
+
+function startGame(){
+ if(!db){
+  alert("Primero configura Supabase en el código.");
+  return;
+ }
+
+ playerName=document.getElementById("name").value.trim();
+
+ if(!playerName){
+  alert("Escribe tu nombre.");
+  return;
+ }
+
+ score=0;
+ lives=3;
+ level=1;
+ frame=0;
+ bullets=[];
+ enemyBullets=[];
+ player.x=325;
+ enemyDir=1;
+ createEnemies();
+
+ playing=true;
+ document.getElementById("startScreen").style.display="none";
+ document.getElementById("gameScreen").style.display="block";
+
+ updateStats();
+ cancelAnimationFrame(animationId);
+ animationId=requestAnimationFrame(loop);
+}
+
+function createEnemies(){
+ enemies=[];
+ for(let row=0;row<4;row++){
+  for(let col=0;col<8;col++){
+   enemies.push({
+    x:45+col*78,
+    y:45+row*48,
+    w:34,h:25,alive:true
+   });
+  }
+ }
+}
+
+function updateStats(){
+ document.getElementById("score").textContent=score;
+ document.getElementById("lives").textContent=lives;
+ document.getElementById("level").textContent=level;
+}
+
+// ===================================
+// CONTROLES
+// ===================================
+
+document.addEventListener("keydown",e=>{
+ if(["ArrowLeft","ArrowRight"," "].includes(e.key))
+  e.preventDefault();
+
+ if(e.key==="ArrowLeft"||e.key.toLowerCase()==="a")left=true;
+ if(e.key==="ArrowRight"||e.key.toLowerCase()==="d")right=true;
+ if(e.code==="Space"&&!e.repeat)shoot();
+});
+
+document.addEventListener("keyup",e=>{
+ if(e.key==="ArrowLeft"||e.key.toLowerCase()==="a")left=false;
+ if(e.key==="ArrowRight"||e.key.toLowerCase()==="d")right=false;
+});
+
+function bindButton(id,direction){
+ const btn=document.getElementById(id);
+ btn.addEventListener("pointerdown",e=>{
+  e.preventDefault();
+  direction==="left"?left=true:right=true;
+ });
+ ["pointerup","pointerleave","pointercancel"].forEach(event=>{
+  btn.addEventListener(event,()=>{
+   direction==="left"?left=false:right=false;
+  });
+ });
+}
+
+bindButton("leftBtn","left");
+bindButton("rightBtn","right");
+
+function shoot(){
+ if(playing&&bullets.length<5){
+  bullets.push({x:player.x+22,y:player.y-10});
+ }
+}
+
+// ===================================
+// DIBUJAR
+// ===================================
+
+function drawPlayer(){
+ ctx.fillStyle="#36eaff";
+ ctx.fillRect(player.x,player.y,player.w,player.h);
+ ctx.fillStyle="white";
+ ctx.fillRect(player.x+19,player.y-12,10,15);
+}
+
+function drawEnemies(){
+ enemies.forEach(e=>{
+  if(!e.alive)return;
+  ctx.fillStyle="#ff477e";
+  ctx.fillRect(e.x,e.y,e.w,e.h);
+  ctx.fillStyle="#080b20";
+  ctx.fillRect(e.x+7,e.y+7,5,5);
+  ctx.fillRect(e.x+23,e.y+7,5,5);
+ });
+}
+
+// ===================================
+// BUCLE PRINCIPAL
+// ===================================
+
+function loop(){
+ if(!playing)return;
+ frame++;
+
+ ctx.clearRect(0,0,700,500);
+
+ if(left)player.x-=5;
+ if(right)player.x+=5;
+ player.x=Math.max(0,Math.min(652,player.x));
+
+ drawPlayer();
+
+ let change=false;
+
+ enemies.forEach(e=>{
+  if(!e.alive)return;
+  e.x+=enemyDir*(1+level*.25);
+  if(e.x<5||e.x+e.w>695)change=true;
+ });
+
+ if(change){
+  enemyDir*=-1;
+  enemies.forEach(e=>{
+   if(e.alive)e.y+=15;
+  });
+ }
+
+ drawEnemies();
+
+ // Disparos del jugador
+ bullets.forEach(b=>b.y-=8);
+ bullets=bullets.filter(b=>b.y>0);
+
+ bullets.forEach(b=>{
+  enemies.forEach(e=>{
+   if(e.alive&&b.x>e.x&&b.x<e.x+e.w&&
+      b.y>e.y&&b.y<e.y+e.h){
+    e.alive=false;
+    b.y=-10;
+    score+=10;
+    updateStats();
+   }
+  });
+ });
+
+ // Disparos enemigos
+ if(frame%65===0&&enemies.some(e=>e.alive)){
+  let living=enemies.filter(e=>e.alive);
+  let e=living[Math.floor(Math.random()*living.length)];
+  enemyBullets.push({x:e.x+15,y:e.y+25});
+ }
+
+ enemyBullets.forEach(b=>b.y+=4+level*.3);
+ enemyBullets=enemyBullets.filter(b=>b.y<510);
+
+ enemyBullets.forEach(b=>{
+  if(b.x>player.x&&b.x<player.x+player.w&&
+     b.y>player.y&&b.y<player.y+player.h){
+   b.y=600;
+   lives--;
+   updateStats();
+  }
+ });
+
+ enemyBullets.forEach(b=>{
+  ctx.fillStyle="#ffcc45";
+  ctx.fillRect(b.x,b.y,5,12);
+ });
+
+ bullets.forEach(b=>{
+  ctx.fillStyle="white";
+  ctx.fillRect(b.x,b.y,5,13);
+ });
+
+ if(enemies.some(e=>e.alive&&e.y+e.h>=player.y)){
+  finishGame("¡Los invasores llegaron!");
+  return;
+ }
+
+ if(lives<=0){
+  finishGame("¡Te quedaste sin vidas!");
+  return;
+ }
+
+ if(!enemies.some(e=>e.alive)){
+  level++;
+  createEnemies();
+  enemyBullets=[];
+  updateStats();
+ }
+
+ animationId=requestAnimationFrame(loop);
+}
+
+// ===================================
+// TERMINAR PARTIDA
+// ===================================
+
+async function finishGame(message){
+ playing=false;
+ cancelAnimationFrame(animationId);
+ left=false;
+ right=false;
+
+ alert(message+"\nPuntuación: "+score);
+
+ await saveScore();
+}
+
+function backToMenu(){
+ playing=false;
+ cancelAnimationFrame(animationId);
+ left=false;
+ right=false;
+ document.getElementById("gameScreen").style.display="none";
+ document.getElementById("startScreen").style.display="block";
+}
+
+if(db){
+ loadRanking();
+}else{
+ document.getElementById("status").textContent=
+ "Falta configurar la conexión con Supabase.";
+ document.getElementById("ranking").innerHTML=
+ "<tr><td colspan='3'>Configura la conexión para ver el ranking.</td></tr>";
+}
+
+</script>
+</body>
+</html>
